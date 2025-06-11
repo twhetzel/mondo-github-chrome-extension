@@ -1,0 +1,158 @@
+/* --- Main UI Container --- */
+#mondo-analyzer-container {
+    /* This is now the INITIAL state: white background */
+    background-color: #ffffff; 
+    /*border: 1px solid #d0d7de; */
+    border-radius: 6px;
+    margin-top: 16px; 
+    margin-bottom: 20px;
+    padding: 16px;
+    font-size: 14px;
+    color: #24292f;
+    
+    /* Add a smooth transition for the color change */
+    transition: background-color 0.3s ease-in-out;
+}
+
+/* This is the NEW ACTIVE state, triggered by JavaScript */
+#mondo-analyzer-container.analysis-displayed {
+    background-color: #f6f8fa; /* The gray background */
+}
+
+/* --- The Button --- */
+/*#mondo-analyze-btn {
+    background-color: #f6f8fa; 
+    color: #24292f;
+    border: 1px solid rgba(27, 31, 36, 0.15);
+}
+
+#mondo-analyze-btn:hover {
+    background-color: #f3f4f6;
+}*/
+
+/* --- The Button (Option 2: GitHub Green) --- */
+ /*#mondo-analyze-btn {
+    background-color: #238636 !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(240, 246, 252, 0.1);
+    font-weight: 500;
+}
+
+#mondo-analyze-btn:hover {
+    background-color: #298e46 !important;
+}*/
+
+
+/* --- Style for the PNG Icon Button --- */
+#mondo-analyze-btn {
+    background-color: #238636 !important; 
+    color: #ffffff !important; 
+    border: 1px solid rgba(240, 246, 252, 0.1);
+    font-weight: 500;
+
+    /* Use Flexbox for perfect alignment of icon and text */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    
+    /* Remove old background properties, as the ::before element will handle it */
+    padding-left: 12px; /* Adjust padding as needed */
+}
+
+/* New pseudo-element to hold and style the icon */
+#mondo-analyze-btn::before {
+    content: ''; 
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-right: 8px; 
+    
+    /* Set the icon as the background */
+    background-image: url('chrome-extension://__MSG_@@extension_id__/robot-32.png');
+    background-size: 24px 24px;
+    background-repeat: no-repeat;
+    
+    /* The magic filter to make the black parts of the PNG white */
+    filter: brightness(0) invert(1);
+}
+
+#mondo-analyze-btn:hover {
+    background-color: #298e46 !important;
+}
+
+
+
+
+/* --- Results Area (Populated after analysis) --- */
+#mondo-analyzer-results {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #d8dee4;
+}
+
+#mondo-analyzer-results:empty {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+
+/* --- STYLES FOR THE TEXT INSIDE THE RESULTS --- */
+
+/* Style for H3 (Mondo Issue Analysis) and H4 (Template Checklist) */
+#mondo-analyzer-results h3, 
+#mondo-analyzer-results h4 {
+    margin-top: 0;
+    font-size: 16px;
+    font-weight: 600; 
+    border-bottom: 1px solid #d8dee4;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    color: #24292f; /* +++ FIX 1: Explicitly set heading color to black +++ */
+}
+
+/* Style for main paragraphs (Summary, Recommended Action) */
+#mondo-analyzer-results p {
+    line-height: 1.5; 
+    color: #24292f;
+}
+
+/* Style for the checklist items */
+#mondo-analyzer-results .analysis-item {
+    display: flex;
+    align-items: flex-start; 
+    margin-bottom: 10px; 
+    line-height: 1.5;
+    color: #24292f; /* +++ FIX 2: Explicitly set checklist text color to black +++ */
+}
+
+#mondo-analyzer-results .status-icon {
+    margin-right: 10px; 
+    margin-top: 2px; 
+    font-size: 16px;
+}
+
+/* Icon colors */
+#mondo-analyzer-results .status-icon.success {
+    color: #1a7f37;
+}
+
+#mondo-analyzer-results .status-icon.warning {
+    color: #9a6700; 
+}
+
+#mondo-analyzer-results .status-icon.error {
+    color: #d1242f;
+}
+
+/* --- New styles for the button --- */
+#mondo-analyze-btn {
+    background-color: #f6f8fa; /* A standard GitHub light gray/white */
+    color: #24292f; /* Dark text for contrast */
+    border: 1px solid rgba(27, 31, 36, 0.15);
+}
+
+/* Optional: a style for when you hover over the button */
+#mondo-analyze-btn:hover {
+    background-color: #f3f4f6;
+}
