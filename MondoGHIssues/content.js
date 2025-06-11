@@ -2,176 +2,208 @@
 if (!window.mondoAnalyzerInitialized) {
     // Set the guard flag immediately.
     window.mondoAnalyzerInitialized = true;
-    console.log('Mondo Analyzer: Initializing script (v9 - Complete & Final).');
-
-    /**
-     * This function sends the issue's title and body to the AI for analysis.
-     * The core "testing logic" is defined inside the 'prompt' constant here.
-     */
-    async function analyzeIssueWithLLM(title, body, apiKey) {
-        const apiURL = 'https://api.openai.com/v1/chat/completions';
-
-        // This is the full set of instructions and tests for the AI.
-        const prompt = `
-            You are an expert ontology curator for the Mondo Disease Ontology.
-            Your task is to analyze a GitHub issue requesting a new term.
-            The issue must follow a specific template.
-
-            Analyze the following issue content and determine if all required fields are filled out correctly.
-            The required fields are:
-            1.  "New term label": Should be present and unambiguous.
-            2.  "Your nano-attribution (ORCID)": Should be present.
-            3.  "Parent term": Should be a valid MONDO ID (e.g., MONDO:0000001).
-            4.  "Definition": Should be a clear, scientific definition.
-            5.  "Synonyms": Should list at least one synonym or state "None".
-            6.  "Related DBXrefs": Should provide related database cross-references or state "None".
-
-            Based on your analysis, provide a summary and a recommended action.
-
-            ISSUE TITLE: "${title}"
-            ISSUE BODY:
-            ---
-            ${body}
-            ---
-
-            Return your analysis ONLY as a JSON object with the following structure:
-            {
-              "summary": "A one-sentence summary of the request and its readiness.",
-              "checks": [
-                { "field": "Term Label", "status": "OK|MISSING|INCOMPLETE", "comment": "Your reasoning." },
-                { "field": "Attribution (ORCID)", "status": "OK|MISSING|INCOMPLETE", "comment": "Your reasoning." },
-                { "field": "Parent Term", "status": "OK|MISSING|INVALID_FORMAT", "comment": "Your reasoning. If invalid, state why." },
-                { "field": "Definition", "status": "OK|MISSING|INCOMPLETE", "comment": "Your reasoning." },
-                { "field": "Synonyms", "status": "OK|MISSING", "comment": "Your reasoning." }
-              ],
-              "recommendedAction": "READY_FOR_CURATOR|NEEDS_MORE_INFO|OUT_OF_SCOPE",
-              "actionComment": "A brief explanation for the recommended action."
-            }
-        `;
-        try {
-            const response = await fetch(apiURL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify({
-                    model: 'gpt-4-turbo-preview',
-                    messages: [{ role: 'user', content: prompt }],
-                    response_format: { type: "json_object" }
-                })
-            });
-            if (!response.ok) throw new Error(`API request failed: ${response.statusText}`);
-            const data = await response.json();
-            return JSON.parse(data.choices[0].message.content);
-        } catch (error) {
-            console.error('Mondo Analyzer: Error analyzing issue:', error);
-            return { error: `Failed to get analysis from API. ${error.message}` };
-        }
-    }
+    console.log('Mondo Analyzer: Initializing script (v15 - Conditional Workflow).');
 
     /**
      * This function takes the JSON response from the AI and renders it as HTML on the page.
+     * It includes the linkify helper to make URLs clickable.
      */
     function displayAnalysisUI(analysis, targetElement) {
-        if (!targetElement) return;
+        if (!targetElement || !analysis) { console.error("Invalid data passed to displayAnalysisUI"); return; }
         if (analysis.error) {
             targetElement.innerHTML = `<h3>Mondo Issue Analysis</h3><p style="color: #f85149;">${analysis.error}</p>`;
             return;
         }
+        
         const getIcon = (status) => {
-            switch(status) {
+            const upperStatus = status ? status.toUpperCase() : 'ERROR';
+            switch(upperStatus) {
                 case 'OK': return '<span class="status-icon success">✔</span>';
+                case 'NOT_APPLICABLE': return '<span class="status-icon na">-</span>';
                 case 'MISSING': case 'INCOMPLETE': case 'INVALID_FORMAT': return '<span class="status-icon warning">⚠️</span>';
-                default: return '<span class="status-icon error">✖</span>';
+                default: console.warn(`Unknown status received from AI: "${status}"`); return '<span class="status-icon error">✖</span>';
             }
         };
-        let checksHTML = analysis.checks.map(item => `
+
+        function linkify(text) {
+            if (!text) return '';
+            const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlRegex, url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+        }
+
+        if (!analysis.checks || !Array.isArray(analysis.checks)) {
+            targetElement.innerHTML = `<p style="color: #f85149;">Error: Analysis response from AI was malformed.</p>`;
+            return;
+        }
+        
+        let checksHTML = analysis.checks.map(item => {
+            const linkedComment = linkify(item.comment || 'No comment provided.');
+            return `
             <div class="analysis-item">
                 ${getIcon(item.status)}
-                <div><strong>${item.field}:</strong> ${item.comment}</div>
-            </div>`).join('');
+                <div><strong>${item.field}:</strong> ${linkedComment}</div>
+            </div>`;
+        }).join('');
+        
         targetElement.innerHTML = `
             <h3>Mondo Issue Analysis</h3>
-            <p><strong>Summary:</strong> ${analysis.summary}</p>
-            <p><strong>Recommended Action:</strong> <strong>${analysis.recommendedAction.replace(/_/g, ' ')}</strong> - ${analysis.actionComment}</p>
-            <hr style="border-color: #30363d; margin: 12px 0;">
+            <p><strong>Summary:</strong> ${analysis.summary || 'No summary provided.'}</p>
+            <p><strong>Recommended Action:</strong> <strong>${(analysis.recommendedAction || 'NONE').replace(/_/g, ' ')}</strong> - ${analysis.actionComment || ''}</p>
+            <hr style="border-color: #d0d7de; margin: 12px 0;">
             <h4>Template Checklist</h4>
             ${checksHTML}`;
     }
 
     /**
-     * This function sets up the button on the page and contains all the final, correct selectors.
+     * This function sets up the button and contains the master workflow logic.
      */
     function initializeAnalyzerUI() {
-        // The correct selector for finding the labels, based on your screenshot.
-        const labelElements = document.querySelectorAll('[data-testid="issue-labels"] a');
-        const issueLabels = Array.from(labelElements).map(labelElement => labelElement.innerText.trim());
-        
-        console.log('Mondo Analyzer: Found labels:', issueLabels);
-
-        if (!issueLabels.includes('new term request')) {
-            console.log('Mondo Analyzer: Label "new term request" not found. Skipping UI injection.'); 
+        if (document.getElementById('mondo-analyzer-container')) {
             return;
         }
+        const labelElements = document.querySelectorAll('[data-testid="issue-labels"] a');
+        const issueLabels = Array.from(labelElements).map(l => l.innerText.trim());
+        if (!issueLabels.includes('new term request')) { return; }
 
-        // The correct anchor element to inject our UI after.
-        const issueHeader = document.querySelector('[data-testid="issue-header"]'); 
+        const issueHeader = document.querySelector('[data-testid="issue-header"]');
         
-        if (issueHeader && !document.getElementById('mondo-analyzer-container')) {
+        if (issueHeader) {
             const container = document.createElement('div');
             container.id = 'mondo-analyzer-container';
             const analyzeButton = document.createElement('button');
             analyzeButton.id = 'mondo-analyze-btn';
             analyzeButton.className = 'btn';
-            // analyzeButton.innerHTML = '🤖  Analyze Issue';
             analyzeButton.innerHTML = 'Analyze Issue';
             const resultsDiv = document.createElement('div');
             resultsDiv.id = 'mondo-analyzer-results';
             container.appendChild(analyzeButton);
             container.appendChild(resultsDiv);
             issueHeader.parentNode.insertBefore(container, issueHeader.nextSibling);
-            console.log('Mondo Analyzer: UI injected successfully.');
 
             analyzeButton.addEventListener('click', async () => {
                 document.getElementById('mondo-analyzer-container').classList.add('analysis-displayed');
                 analyzeButton.disabled = true;
-                resultsDiv.innerHTML = '<p>Analyzing, please wait...</p>';
-                const data = await chrome.storage.sync.get(['openai_api_key']);
-                if (!data.openai_api_key) {
-                    resultsDiv.innerHTML = `<p style="color: #d29922;">OpenAI API Key not set. Please set it in the extension popup.</p>`;
+                const apiKey = (await chrome.storage.sync.get(['openai_api_key'])).openai_api_key;
+                if (!apiKey) {
+                    resultsDiv.innerHTML = `<p style="color: #d29922;">OpenAI API Key not set.</p>`;
                     analyzeButton.disabled = false; return;
                 }
                 const issueTitle = document.querySelector('[data-testid="issue-title"]').innerText;
-                
-                // The final, correct selector for the issue body text, based on your screenshot.
-                const issueBodyElement = document.querySelector('.markdown-body');
-                
-                if (!issueBodyElement) {
-                    console.error("Mondo Analyzer: Could not find the issue body element with class '.markdown-body'");
-                    resultsDiv.innerHTML = `<p style="color: #f85149;">Error: Could not find the issue's main text. The page structure may have changed.</p>`;
+                const issueBody = document.querySelector('.markdown-body').innerText;
+
+                try {
+                    // --- Master Workflow Switch ---
+                    if (issueTitle.trim().startsWith('[NTR/gene]')) {
+                        // --- GENE-SPECIFIC WORKFLOW ---
+                        resultsDiv.innerHTML = '<p>Step 1/3: Extracting gene & species info from title...</p>';
+                        const geneInfo = await extractGeneInfoFromLLM(issueTitle, apiKey);
+
+                        if (!geneInfo.geneSymbol) {
+                            throw new Error("Title starts with [NTR/gene] but could not extract a gene symbol.");
+                        }
+                        
+                        let geneDetails;
+                        if (geneInfo.animal) {
+                            // --- NCBI Path (Non-Human) ---
+                            resultsDiv.innerHTML = `<p>Step 2/3: Searching NCBI for gene "${geneInfo.geneSymbol}" in ${geneInfo.animal}...</p>`;
+                            const response = await chrome.runtime.sendMessage({ action: 'fetchNcbiGeneDetails', data: geneInfo });
+                            if (response.status === 'error') throw new Error(response.message);
+                            geneDetails = response.details;
+                        } else {
+                            // --- HGNC Path (Human) ---
+                            resultsDiv.innerHTML = `<p>Step 2/3: Searching HGNC for human gene "${geneInfo.geneSymbol}"...</p>`;
+                            const response = await chrome.runtime.sendMessage({ action: 'fetchHgncGeneDetails', data: geneInfo });
+                            if (response.status === 'error') throw new Error(response.message);
+                            geneDetails = response.details;
+                        }
+
+                        resultsDiv.innerHTML = `<p>Step 3/3: Compiling final analysis...</p>`;
+                        const finalAnalysis = await getFinalAnalysisFromLLM(issueTitle, issueBody, geneDetails, apiKey);
+                        displayAnalysisUI(finalAnalysis, resultsDiv);
+                    } else {
+                        // --- SIMPLE WORKFLOW ---
+                        resultsDiv.innerHTML = '<p>Analyzing as a standard term...</p>';
+                        const simpleAnalysis = await getSimpleAnalysisFromLLM(issueTitle, issueBody, apiKey);
+                        displayAnalysisUI(simpleAnalysis, resultsDiv);
+                    }
+                } catch (error) {
+                    console.error("Analysis pipeline failed:", error);
+                    resultsDiv.innerHTML = `<p style="color: #d1242f;">Error during analysis: ${error.message}</p>`;
+                } finally {
                     analyzeButton.disabled = false;
-                    return;
                 }
-                const issueBody = issueBodyElement.innerText;
-                
-                const analysis = await analyzeIssueWithLLM(issueTitle, issueBody, data.openai_api_key);
-                displayAnalysisUI(analysis, resultsDiv);
-                analyzeButton.disabled = false;
             });
         }
     }
 
     /**
-     * This observer waits for the page to be ready before trying to inject the UI.
+     * LLM Call #1: Extracts gene symbol and determines if human or non-human context.
      */
-    const observer = new MutationObserver((mutations, obs) => {
-        // Waits for our reliable anchor element to appear.
-        if (document.querySelector('[data-testid="issue-header"]')) {
-            console.log('Mondo Analyzer: Observer found injection point.');
-            initializeAnalyzerUI();
-            obs.disconnect();
-            console.log('Mondo Analyzer: Observer disconnected.');
+    async function extractGeneInfoFromLLM(title, apiKey) {
+        const prompt = `Your job is to extract a gene symbol and potentially a non-human animal from a GitHub issue title. The title is: "${title}". 1. Look for a short, all-caps gene symbol (e.g., "KIT", "STX17"). 2. Look for a non-human animal. If found, provide its scientific name (e.g., "feline" -> "Felis catus", "canine" -> "Canis lupus familiaris"). If no non-human animal is mentioned, assume the context is human. Return a JSON object like {"animal": "...", "geneSymbol": "..."}. If the context is human, return {"animal": null, "geneSymbol": "..."}. If no gene symbol can be found, return {"geneSymbol": null}. Return ONLY the JSON object.`;
+        const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: 'gpt-4-turbo-preview', messages: [{ role: 'user', content: prompt }], response_format: { type: "json_object" } }) });
+        if (!response.ok) throw new Error(`LLM call (extractGeneInfo) failed: ${response.statusText}`);
+        const data = await response.json();
+        return JSON.parse(data.choices[0].message.content);
+    }
+
+    /**
+     * LLM Call #2: Takes enriched data (from NCBI or HGNC) and creates the final report.
+     */
+    async function getFinalAnalysisFromLLM(title, body, geneDetails, apiKey) {
+        let geneContext;
+        if (geneDetails) {
+            geneContext = `A search for the gene in the title was performed. The following verified information was found from ${geneDetails.source}:
+            - Gene ID: ${geneDetails.geneId}
+            - Full Gene Name: "${geneDetails.geneName}"
+            - Link: ${geneDetails.geneLink}
+            For the "Gene Identifier" check, the status MUST be "OK".`;
+        } else {
+            geneContext = `A search for the gene in the title was performed, but no matching ID was found from the relevant database (NCBI or HGNC). For the "Gene Identifier" check, the status MUST be "MISSING".`;
         }
+
+        const prompt = `You are an expert ontology curator. Analyze the following GitHub issue using the information I provide.
+            ${geneContext}
+            The issue body is below:
+            ---
+            ${body}
+            ---
+            Return your analysis as a JSON object with the exact structure: {"summary": "...", "checks": [{"field": "...", "status": "...", "comment": "..."}], "recommendedAction": "...", "actionComment": "..."}.
+            The "checks" array MUST contain these six fields in this order: "Term Label", "Attribution (ORCID)", "Parent Term", "Definition", "Synonyms", "Gene Identifier".
+            For EACH item in the "checks" array, the "status" value MUST be one of these exact strings: "OK", "MISSING", "INCOMPLETE", "INVALID_FORMAT".
+            For the "Gene Identifier" comment, you MUST include the source (NCBI/HGNC), the full gene name, and the link if they were found. If nothing was found, state that.`;
+        const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: 'gpt-4-turbo-preview', messages: [{ role: 'user', content: prompt }], response_format: { type: "json_object" } }) });
+        if (!response.ok) throw new Error(`LLM call (getFinalAnalysis) failed: ${response.statusText}`);
+        const data = await response.json();
+        return JSON.parse(data.choices[0].message.content);
+    }
+    
+    /**
+     * Fallback LLM Call: For simple issues that do not start with [NTR/gene].
+     */
+    async function getSimpleAnalysisFromLLM(title, body, apiKey) {
+        const prompt = `You are an expert ontology curator. Analyze the following GitHub issue.
+            The issue body is below:
+            ---
+            ${body}
+            ---
+            Return your analysis as a JSON object with the exact structure: {"summary": "...", "checks": [{"field": "...", "status": "...", "comment": "..."}], "recommendedAction": "...", "actionComment": "..."}.
+            The "checks" array MUST contain these five fields in this order: "Term Label", "Attribution (ORCID)", "Parent Term", "Definition", "Synonyms".
+            For each check, the "status" value MUST be one of these exact strings: "OK", "MISSING", "INCOMPLETE", "INVALID_FORMAT".`;
+        const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify({ model: 'gpt-4-turbo-preview', messages: [{ role: 'user', content: prompt }], response_format: { type: "json_object" } }) });
+        if (!response.ok) throw new Error(`LLM call (getSimpleAnalysis) failed: ${response.statusText}`);
+        const data = await response.json();
+        return JSON.parse(data.choices[0].message.content);
+    }
+    
+    // This observer waits for the page to be ready before trying to inject the UI.
+    const observer = new MutationObserver((mutations) => {
+        initializeAnalyzerUI();
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
-
-} // End of the main "if" block
+    // This will fire on full page loads and on SPA navigations.
+    observer.observe(document.body, { 
+        childList: true, 
+        subtree: true 
+    });
+}
